@@ -39,6 +39,10 @@ import os
 import types
 import pickle
 import sys
+import argparse
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 from optparse import OptionParser
@@ -100,7 +104,11 @@ class Dups(object):
             pickle.dump(self.hash_index, cf)
             
 
-    def add_path(self, path):
+    def add_path(self, args):
+        path = args.PATH
+        role = args.ROLE
+        
+        logging.debug("Add path is called with %s", path)
         assert self.indexed_paths is not None
         
         if not os.path.exists(path):
@@ -112,16 +120,29 @@ class Dups(object):
             return
         self.indexed_paths.append(path)
 
-    def remove_path(self, path):
+    def remove_path(self, args):
+        path = args.PATH
+        
         self.indexed_paths.remove(path)
         # TODO: also remove all files from index
 
-    def add_ext(self, ext):
+    def add_ext(self, args):
+        ext = args.EXT
+        
         ext = ext.lower()
         if ext in self.exts:
             print("Extension has been added already")
             return
         self.exts.append(ext)
+
+    def remove_ext(self, args):
+        ext = args.EXT
+        
+        ext = ext.lower()
+        if ext not in self.exts():
+            print("Extensions isn't indexed. Nothing to remove")
+            return
+        self.exts.remove(ext)
       
     def show_possible_duplicates(self):
         # building index "name-size"
@@ -171,7 +192,7 @@ class Dups(object):
         else:
             return ",".join(paths)
            
-    def show_duplicates(self):
+    def show_duplicates(self, args):
         # more than one file with same hash value
         def more_than_one_file(element):
             return type(element) == types.ListType and len(element) > 1
@@ -206,7 +227,7 @@ class Dups(object):
 #                       if get_if_in_priority(p) is None:
 #                           print ("rm %s" % (p,))
 
-    def dedup(self):
+    def dedup(self, args):
         def more_than_one_file(element):
             return type(element) == types.ListType and len(element) > 1
         
@@ -224,7 +245,7 @@ class Dups(object):
                 del self.hash_index[f["hash"]]
 
 
-    def update(self):
+    def update_index(self, args):
         self.sync()
         self.add_new()
         
@@ -296,7 +317,7 @@ class Dups(object):
 
 
 
-    def reindex(self):
+    def reindex(self, args):
         valid_paths = [x for x in self.indexed_paths if os.path.isdir(x)]
         if len(valid_paths) == 0:
             print("There is no valid paths", self.indexed_paths)
@@ -338,18 +359,21 @@ class Dups(object):
                                             }
                     add_to_index(full_path)
 
-    def show_all(self):
+    def show_settings(self, args):
         if len(self.indexed_paths) > 0:
-            print("Indexable paths:")
+            print("Indexed paths:")
             for x in self.indexed_paths:
                 print(x)
             print()
+            
         if len(self.exts) > 0:
             print ("Indexable extensions:")
             for x in self.exts:
                 print (x)
     
-    def show_other(self, excludes):
+    def show_others(self, args):
+        excludes = args.EXCLUDE
+        
         valid_paths = [x for x in self.indexed_paths if os.path.isdir(x)]
         if len(valid_paths) == 0:
             print("There are no valid paths", self.indexed_paths)
@@ -371,66 +395,89 @@ def main():
     global dups
     dups = Dups(DB_PATH)
 
-if __name__=="__main__":
-        args = sys.argv
-
-        if len(args) < 2:
-            print("Usage: ", args[0], " index")
-            print(args[0], "remove <path>\tRemoves path from indexed paths list")
-            print(args[0], "add <path>\tAdds path to indexed paths list")
-            print(args[0], "update\tRemoves deleted from disk files from index and adds new files")
-            print(args[0], "reindex\tClears index and recomputes everything")
-            print(args[0], "show\tShows duplicates")
-            print(args[0], "dedup\tRemoves duplicates. Asks which one to delete first")
-            print(args[0], "add_ext\tAdds extension to list of indexable file extensions")
-            print(args[0], "del_ext\tRemoves extension from list of indexable file extensions")
-            print(args[0], "show_all\tShows all config settings")
-            print(args[0], "show_other\tShows files that have non-indexable extensions")
-            print("\nOptions:")
-            print("-db <dbfile>\t Doesn't work (yet)")
-            sys.exit(-1)
-
-        main()
-
-        if args[1] == "add":
-            if len(args) > 2:
-                if os.path.isdir(args[2]):
-                    dups.add_path(args[2])
+def create_parser(parser, desc):
+    logging.debug("Processing %s", repr(desc))
+    if "command" in desc.keys():
+        logging.debug("It is a command. Adding arguments and options")
+        if "args" in desc:
+            for x in desc["args"]:
+                if type(x) == str:
+                    parser.add_argument(x)
                 else:
-                    print("Specified file is not directory")
-            else:
-                print("Usage: ", args[0], " add <path>")
-        elif args[1] == "remove":
-            if len(args) > 2:
-                p = args[2]
-                if p.startswith("-"):
-                    p = p[1:]
-                    print(p)
-                    dups.remove_path(p)
-                    print("Deleted")
-        elif args[1] == "index":
-            dups.reindex()
-        elif args[1] == "update":
-            dups.update()
-        elif args[1] == "show":
-            # TODO: specify algorithm (hash-based, mtime/ctime)
-            dups.show_duplicates()
-        elif args[1] == "show_p":
-                 dups.show_possible_duplicates()
-        elif args[1] == "add_ext":
-            if len(args) > 2:
-                dups.add_ext(args[2])
-        elif args[1] == "path":
-            print(dups.indexed_paths)
-        elif args[1] == "clear":
-            dups.dedup()
-        elif args[1] == "show_all":
-            dups.show_all()
-        elif args[1] == "show_other":
-                excludes = []
-                excludes = args[2:]
-                dups.show_other(excludes)
-        else:
-            print("Invalid command")
-            
-        dups.save()
+                    parser.add_argument(x[0], **x[1])
+        parser.description = desc.get("help")
+        parser.set_defaults(func=desc["command"])
+        return
+
+    logging.debug("It's subcommand")
+    commands = parser.add_subparsers()
+    for x in desc.keys():
+        command_parser = commands.add_parser(x)
+        create_parser(command_parser, desc[x])
+
+    return parser
+
+
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description="Find file duplicates")
+    main()
+    parser_desc = {
+        "path" : {
+            "add" : {
+                "command" : dups.add_path,
+                "args" : ["PATH", "ROLE"],
+                "help" : "Adds path PATH with role ROLE to the indexed paths list. Does not perform index update. ROLE is one of {BACKUP, MASTER, IMPORT}"
+                },
+            "remove": {
+                "command" : dups.remove_path,
+                "args" : ["PATH"],
+                "help" : "Removes path PATH from list of indexed paths. Does not perform index update"
+                }
+            },
+        "update" : {
+            "command" : dups.update_index,
+            "help" : "Removes deleted files from the index and adds newly created files to the index"
+            },
+        "reindex" : {
+            "command" : dups.reindex,
+            "help" : "Clears index and recomputes everything. It might be slow"
+            },
+        "show" : {
+            "command" : dups.show_duplicates,
+            "help" : "Shows duplicate files"
+            },
+        "dedup" : {
+            "command" : dups.dedup,
+            "help" : "Make everything how you like it. If duplicates found in IMPORT path, they are dropped. If there are duplicates in BACKUP, they are kept intact",
+            },
+        "exts" : {
+            "add" : {
+                "command" : dups.add_ext,
+                "args" : ["EXT"],
+                "help" : "Adds extension to be indexed. Does not perform index update"
+                },
+            "remove" : {
+                "command" : dups.remove_ext,
+                "args" : ["EXT"],
+                "help" : "Removes extensions from the list of indexed extensions. Does not perform index update"
+                }
+            },
+        "settings": {
+            "command" : dups.show_settings,
+            "help" : "Shows all settings (extensions, indexed paths)"
+            },
+        "others" : {
+            "command" : dups.show_others,
+            "args" : [
+                ("EXCLUDE", { "nargs" : "?", "default" : " " }),
+                ],
+            "help" : "Shows all unindexed files"
+            }
+    }
+
+    parser = create_parser(parser, parser_desc)
+    args = parser.parse_args()
+    args.func(args)
+
+    dups.save()
+
